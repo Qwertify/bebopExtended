@@ -10,12 +10,13 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"encoding/json"
 
 	"github.com/go-chi/chi"
 	"golang.org/x/oauth2"
 
+	"bebopExtended/store"
 	"github.com/disintegration/bebop/jwt"
-	"github.com/disintegration/bebop/store"
 )
 
 
@@ -94,11 +95,11 @@ func (h *Handler) AddProvider(name, id, secret string) error {
 
 func (h *Handler) handleEmailSignIn(w http.ResponseWriter, r *http.Request) {
 	req := EmaiRequest{}
-	if !validEmailReqest(w, &r, &req) {
+	if !ValidEmailReqest(h, w, r, &req) {
 		return
 	}
 
-	SetStateCookie(&h, w, 3600)
+	SetStateCookie(h, w, 3600)
 	h.Logger.Printf("email")
 	h.Logger.Printf(*req.Email)
 
@@ -115,7 +116,7 @@ func (h *Handler) handleEmailSignIn(w http.ResponseWriter, r *http.Request) {
 				h.handleError(w, "failed to create auth token: %s", tokenErr)
 				return
 			}
-			SetResultCookie(&h, w, "success:"+authToken, 3600)
+			SetResultCookie(h, w, "success:"+authToken, 3600)
 			h.Logger.Printf("redir url: %s", w)
 			fmt.Fprint(w, `success`)
 			return
@@ -132,11 +133,11 @@ func (h *Handler) handleEmailSignIn(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleEmailSignUp(w http.ResponseWriter, r *http.Request) {
 	req := EmaiRequest{}
-	if !validEmailReqest(w, &r, &req) {
+	if !ValidEmailReqest(h, w, r, &req) {
 		return
 	}
 
-	SetStateCookie(&h, w, 3600)
+	SetStateCookie(h, w, 3600)
 	h.Logger.Printf("email")
 	h.Logger.Printf(*req.Email)
 
@@ -158,12 +159,12 @@ func (h *Handler) handleEmailSignUp(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			authToken, err = h.JWTService.Create(userID)
+			authToken, err := h.JWTService.Create(userID)
 			if err != nil {
 				h.handleError(w, "failed to create auth token: %s", err)
 				return
 			}
-			SetResultCookie(&h, w, "success:"+authToken, 3600)
+			SetResultCookie(h, w, "success:"+authToken, 3600)
 			h.Logger.Printf("redir url: %s", w)
 			fmt.Fprint(w, `success`)
 			return
@@ -183,12 +184,11 @@ func (h *Handler) handleBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	state := SetStateCookie(h, w, 3600)
 	redirectURL := "localhost:5000/#"
 	if providerName != "email" {
 		redirectURL = provider.config.AuthCodeURL(state)
 	}
-
-	SetStateCookie(&h, w, 3600)
 	h.Logger.Printf("path: %s", h.CookiePath)
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
@@ -252,7 +252,6 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	user, err := h.UserStore.GetByAuth(providerName, u.id)
 	switch err {
 		case nil:
@@ -276,7 +275,7 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			authToken, err = h.JWTService.Create(userID)
+			authToken, err := h.JWTService.Create(userID)
 			if err != nil {
 				h.handleError(w, "failed to create auth token: %s", err)
 				return
@@ -291,7 +290,7 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) renderOAuthResult(w http.ResponseWriter, message string) {
-	SetResultCookie(&h, w, message, 600)
+	SetResultCookie(h, w, message, 600)
 	h.Logger.Printf("redir url: %s", w)
 	fmt.Fprint(w, `<!doctype html><title>OAuth</title><script>try {opener.bebopOAuthEnd()} finally {window.close()}</script>`)
 }
@@ -329,6 +328,6 @@ func (h *Handler) logError(format string, a ...interface{}) {
 }
 
 func (h *Handler) handleError(w http.ResponseWriter, format string, a ...interface{}) {
-	logError(format, a)
+	h.logError(format, a)
 	h.renderOAuthResult(w, "error:Other")
 }

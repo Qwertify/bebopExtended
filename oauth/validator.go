@@ -9,16 +9,16 @@ import (
 )
 
 
-const emailRegularTemplate = regexp.MustCompile(`^([a-zA-Z0-9._-]+@([a-zA-Z0-9_-]+\.)+[a-zA-Z0-9_-]+)$`)
+var emailRegularTemplate = regexp.MustCompile(`^([a-zA-Z0-9._-]+@([a-zA-Z0-9_-]+\.)+[a-zA-Z0-9_-]+)$`)
 
-func ValidEmailReqest(w http.ResponseWriter, r *http.Request, req *EmaiRequest) bool {
+func ValidEmailReqest(h *Handler, w http.ResponseWriter, r *http.Request, req *EmaiRequest) bool {
 	if h.parseRequest(r, &req) != nil {
 		h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
 		return false
-	} else if req.Email == nil || !validEmail(req.Email) {
+	} else if req.Email == nil || !validEmail(*req.Email) {
 	 	h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid email format")
 	 	return false
-	} else if req.Password == nil || !validPassword(req.Password) {
+	} else if req.Password == nil || !validPassword(*req.Password) {
  		h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid password format")
 		return false
 	}

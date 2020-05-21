@@ -35,12 +35,13 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		currentUser.Avatar = h.AvatarService.URL(currentUser)
 	}
 
+	user := convertStoreUsrToExtUsr(currentUser)
 	response := struct {
 		Authenticated bool     `json:"authenticated"`
 		User          *extUser `json:"user,omitempty"`
 	}{
 		Authenticated: currentUser != nil,
-		User:          (*extUser)(currentUser),
+		User:          &user,
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -99,7 +100,8 @@ func (h *Handler) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	if currentUser != nil && currentUser.Admin {
 		users := make([]*extUser, 0, len(usermap))
 		for _, user := range usermap {
-			users = append(users, (*extUser)(user))
+			externalUser := convertStoreUsrToExtUsr(user)
+			users = append(users, &externalUser)
 		}
 		sort.Slice(users, func(i, j int) bool {
 			return users[i].ID < users[j].ID
@@ -157,10 +159,11 @@ func (h *Handler) handleGetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if currentUser != nil && currentUser.Admin {
+		user := convertStoreUsrToExtUsr(currentUser)
 		response := struct {
 			User *extUser `json:"user"`
 		}{
-			User: (*extUser)(user),
+			User: &user,
 		}
 		h.render(w, http.StatusOK, response)
 		return
@@ -385,4 +388,19 @@ func (h *Handler) handleSetUserBlocked(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.render(w, http.StatusOK, struct{}{})
+}
+
+func convertStoreUsrToExtUsr(user *store.User) extUser {
+	return extUser {
+		ID: user.ID,
+		Name: user.Name,
+		CreatedAt: user.CreatedAt,
+		AuthService: user.AuthService,
+		AuthID: user.AuthID,
+		Email: "",
+		Password: "",
+		Blocked: user.Blocked,
+		Admin: user.Admin,
+		Avatar: user.Avatar,
+	}
 }

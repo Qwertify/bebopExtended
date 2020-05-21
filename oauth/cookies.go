@@ -12,12 +12,14 @@ const (
   RESULT_COOKIE = "bebop_oauth_state"
 )
 
-func SetStateCookie(h *Handler, w http.ResponseWriter, maxAge int) {
-  setCookie(&h, w, RESULT_COOKIE, genUnicOperationId(), maxAge)
+func SetStateCookie(h *Handler, w http.ResponseWriter, maxAge int) string {
+  uuid := genUnicOperationId()
+  setCookie(h, w, RESULT_COOKIE, genUnicOperationId(), maxAge)
+  return uuid
 }
 
 func SetResultCookie(h *Handler, w http.ResponseWriter, res string, maxAge int) {
-  setCookie(&h, w, RESULT_COOKIE, res, maxAge)
+  setCookie(h, w, RESULT_COOKIE, res, maxAge)
 }
 
 func setCookie(h *Handler, w http.ResponseWriter, name string, value string, maxAge int) {
@@ -31,5 +33,6 @@ func setCookie(h *Handler, w http.ResponseWriter, name string, value string, max
 }
 
 func genUnicOperationId() string {
-	return uuid.NewV4().String()
+	uuid, _ := uuid.NewV4()
+  return uuid.String()
 }
