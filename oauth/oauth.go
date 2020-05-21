@@ -10,22 +10,16 @@ import (
 	"runtime"
 	"strings"
 	"time"
-	"io"
-	"encoding/json"
 
 	"github.com/go-chi/chi"
-	"github.com/satori/go.uuid"
 	"golang.org/x/oauth2"
 
 	"github.com/disintegration/bebop/jwt"
 	"github.com/disintegration/bebop/store"
 )
 
-const (
-	stateCookie   = "bebop_oauth_state"
-	resultCookie  = "bebop_oauth_result"
-	clientTimeout = 10 * time.Second
-)
+
+const clientTimeout = 10 * time.Second
 
 // Config is a configuration of an OAuth handler.
 type Config struct {
@@ -43,21 +37,28 @@ type Handler struct {
 	router    chi.Router
 }
 
+//Email request signin and signup structure
+type EmaiRequest struct {
+	Email   *string `json:"email"`
+	Password *string `json:"password"`
+}
+
 // New creates a new handler based on the given config.
 func New(config *Config) *Handler {
 	h := &Handler{Config: config}
-
 	h.providers = make(map[string]*provider)
-
 	h.router = chi.NewRouter()
 	h.router.Get("/begin/{provider}", h.handleBegin)
 	h.router.Get("/end/{provider}", h.handleEnd)
 	h.router.Post("/emailSignUp", h.handleEmailSignUp)
 	h.router.Post("/emailSignIn", h.handleEmailSignIn)
 
-
-
 	return h
+}
+
+//Server requests
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.router.ServeHTTP(w, r)
 }
 
 // AddProvider adds a new provider to oauth handler.
@@ -71,13 +72,9 @@ func (h *Handler) AddProvider(name, id, secret string) error {
 
 	if id == "" {
 		return fmt.Errorf("oauth: empty client id of provider %q", name)
-	}
-
-	if secret == "" {
+	} else if secret == "" {
 		return fmt.Errorf("oauth: empty client secret of provider %q", name)
-	}
-
-	if h.providers == nil {
+	} else if h.providers == nil {
 		h.providers = make(map[string]*provider)
 	}
 
@@ -95,218 +92,86 @@ func (h *Handler) AddProvider(name, id, secret string) error {
 	return nil
 }
 
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.router.ServeHTTP(w, r)
-}
-
-func (h *Handler) parseRequest(r *http.Request, data interface{}) error {
-	const maxRequestLen = 16 * 1024 * 1024
-	lr := io.LimitReader(r.Body, maxRequestLen)
-	return json.NewDecoder(lr).Decode(data)
-}
-
-func (h *Handler) renderError(w http.ResponseWriter, status int, code, message string) {
-	response := struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}{}
-	response.Error.Code = code
-	response.Error.Message = message
-	h.render(w, status, response)
-}
-
-func (h *Handler) logError(format string, a ...interface{}) {
-	pc, _, _, _ := runtime.Caller(1)
-	callerNameSplit := strings.Split(runtime.FuncForPC(pc).Name(), ".")
-	funcName := callerNameSplit[len(callerNameSplit)-1]
-	h.Logger.Printf("ERROR: %s: %s", funcName, fmt.Sprintf(format, a...))
-}
-
-func (h *Handler) render(w http.ResponseWriter, status int, data interface{}) {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		h.logError("marshal json: %s", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(jsonData)
-}
-
 func (h *Handler) handleEmailSignIn(w http.ResponseWriter, r *http.Request) {
-	// providerName := "email"
-
-	req := struct {
-		Email   *string `json:"email"`
-		Password *string `json:"password"`
-	}{}
-
-	err := h.parseRequest(r, &req)
-	if err != nil {
-		h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
+	req := EmaiRequest{}
+	if !validEmailReqest(w, &r, &req) {
 		return
 	}
 
-	// if req.Email == nil || !store.ValidTopicTitle(*req.Email) {
-	// 	h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid topic title")
-	// 	return
-	// }
-
-	// if req.Password == nil || !store.ValidCommentContent(*req.Password) {
-	// 	h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid comment content")
-	// 	return
-	// }
-
-	state := h.genState()
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    state,
-		Path:     h.CookiePath,
-		HttpOnly: true,
-		Secure:   strings.HasPrefix(h.MountURL, "https"),
-		MaxAge:   3600,
-	})
-
-	var authToken string
-
+	SetStateCookie(&h, w, 3600)
 	h.Logger.Printf("email")
 	h.Logger.Printf(*req.Email)
 
-	user, err := h.UserStore.GetByEmailPassword(*req.Email,*req.Password)
+	user, err := h.UserStore.GetByEmailPassword(*req.Email, *req.Password)
 	switch err {
-	case nil:
-		if user.Blocked {
-			h.renderOAuthResult(w, "error:UserBlocked")
-			return
-		}
+		case nil:
+			if user.Blocked {
+				h.renderOAuthResult(w, "error:UserBlocked")
+				return
+			}
 
-		authToken, err = h.JWTService.Create(user.ID)
-		if err != nil {
-			h.handleError(w, "failed to create auth token: %s", err)
+			authToken, tokenErr := h.JWTService.Create(user.ID)
+			if tokenErr != nil {
+				h.handleError(w, "failed to create auth token: %s", tokenErr)
+				return
+			}
+			SetResultCookie(&h, w, "success:"+authToken, 3600)
+			h.Logger.Printf("redir url: %s", w)
+			fmt.Fprint(w, `success`)
 			return
-		}
 
-	case store.ErrNotFound:
-		// userID, err := h.UserStore.New(providerName, *req.Email, "")
-		// if err != nil {
-			// h.renderOAuthResult(w, "error:Incorrect email or password")
+		case store.ErrNotFound:
 			fmt.Fprint(w, `Incorrect email or password`)
 			return
-		// 	return
-		// }
 
-		// authToken, err = h.JWTService.Create(userID)
-		// if err != nil {
-		// 	h.handleError(w, "failed to create auth token: %s", err)
-		// 	return
-		// }
-
-	default:
-		h.handleError(w, "failed to get user by auth: %s", err)
-		return
+		default:
+			h.handleError(w, "failed to get user by auth: %s", err)
+			return
 	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:   resultCookie,
-		Value:  "success:"+authToken,
-		Path:   h.CookiePath,
-		// Secure: strings.HasPrefix(h.MountURL, "http"),
-		// MaxAge: 10 * 60,
-	})
-
-	h.Logger.Printf("redir url: %s", w)
-
-	fmt.Fprint(w, `success`)
 }
 
 func (h *Handler) handleEmailSignUp(w http.ResponseWriter, r *http.Request) {
-	providerName := "email"
-
-	req := struct {
-		Email   *string `json:"email"`
-		Password *string `json:"password"`
-	}{}
-
-	err := h.parseRequest(r, &req)
-	if err != nil {
-		h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
+	req := EmaiRequest{}
+	if !validEmailReqest(w, &r, &req) {
 		return
 	}
 
-	// if req.Email == nil || !store.ValidTopicTitle(*req.Email) {
-	// 	h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid topic title")
-	// 	return
-	// }
-
-	// if req.Password == nil || !store.ValidCommentContent(*req.Password) {
-	// 	h.renderError(w, http.StatusBadRequest, "BadRequest", "Invalid comment content")
-	// 	return
-	// }
-
-	state := h.genState()
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    state,
-		Path:     h.CookiePath,
-		// HttpOnly: true,
-		// Secure:   strings.HasPrefix(h.MountURL, "http"),
-		// MaxAge:   1 * 60 * 60,
-	})
-
-	var authToken string
-
+	SetStateCookie(&h, w, 3600)
 	h.Logger.Printf("email")
 	h.Logger.Printf(*req.Email)
 
 	user, err := h.UserStore.GetByEmailPassword(*req.Email,*req.Password)
 	switch err {
-	case nil:
-		if user.Blocked {
-			h.renderOAuthResult(w, "error:UserBlocked")
-			return
-		}
+		case nil:
+			if user.Blocked {
+				h.renderOAuthResult(w, "error:UserBlocked")
+				return
+			}
 
-		authToken, err = h.JWTService.Create(user.ID)
-		if err != nil {
-			h.handleError(w, "failed to create auth token: %s", err)
+			h.handleError(w, "error:UserAlreayRegistred")
 			return
-		}
 
-	case store.ErrNotFound:
-		userID, err := h.UserStore.New(providerName, *req.Email, *req.Password)
-		if err != nil {
-			h.handleError(w, "failed to create user: %s", err)
+		case store.ErrNotFound:
+			userID, err := h.UserStore.New("email", *req.Email, *req.Password)
+			if err != nil {
+				h.handleError(w, "failed to create user: %s", err)
+				return
+			}
+
+			authToken, err = h.JWTService.Create(userID)
+			if err != nil {
+				h.handleError(w, "failed to create auth token: %s", err)
+				return
+			}
+			SetResultCookie(&h, w, "success:"+authToken, 3600)
+			h.Logger.Printf("redir url: %s", w)
+			fmt.Fprint(w, `success`)
 			return
-		}
 
-		authToken, err = h.JWTService.Create(userID)
-		if err != nil {
-			h.handleError(w, "failed to create auth token: %s", err)
+		default:
+			h.handleError(w, "failed to get user by auth: %s", err)
 			return
-		}
-
-	default:
-		h.handleError(w, "failed to get user by auth: %s", err)
-		return
 	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:   resultCookie,
-		Value:  "success:"+authToken,
-		Path:   h.CookiePath,
-		// Secure: strings.HasPrefix(h.MountURL, "http"),
-		// MaxAge: 10 * 60,
-	})
-
-	h.Logger.Printf("redir url: %s", w)
-
-	fmt.Fprint(w, `success`)
 }
 
 func (h *Handler) handleBegin(w http.ResponseWriter, r *http.Request) {
@@ -318,24 +183,13 @@ func (h *Handler) handleBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := h.genState()
 	redirectURL := "localhost:5000/#"
 	if providerName != "email" {
 		redirectURL = provider.config.AuthCodeURL(state)
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    state,
-		Path:     h.CookiePath,
-		HttpOnly: true,
-		Secure:   strings.HasPrefix(h.MountURL, "https"),
-		MaxAge:   3600,
-	})
-
-
+	SetStateCookie(&h, w, 3600)
 	h.Logger.Printf("path: %s", h.CookiePath)
-
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
@@ -344,9 +198,6 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	providerName := chi.URLParam(r, "provider")
 	h.Logger.Printf("providerName: %s", providerName)
 
-	// if providerName != "email" {
-
-
 	provider, ok := h.providers[providerName]
 	if !ok {
 		h.Logger.Printf("in not found")
@@ -354,20 +205,11 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cookie, err := r.Cookie(stateCookie)
+	cookie, err := r.Cookie(STATE_COOKIE)
 	if err != nil {
 		h.handleError(w, "failed to get oauth state cookie: %s", err)
 		return
 	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    "",
-		Path:     h.CookiePath,
-		HttpOnly: true,
-		Secure:   strings.HasPrefix(h.MountURL, "https"),
-		MaxAge:   3600,
-	})
 
 	state := cookie.Value
 	if state == "" {
@@ -379,7 +221,6 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	h.Logger.Printf("queryState: %s", queryState)
 	h.Logger.Printf("state: %s", state)
 	if queryState != state {
-
 		h.handleError(w, "bad state value")
 		return
 	}
@@ -397,8 +238,7 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.handleError(w, "exchange failed: %s", err)
 		return
-	}
-	if !token.Valid() {
+	} else if !token.Valid() {
 		h.handleError(w, "invalid token")
 		return
 	}
@@ -407,72 +247,88 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.handleError(w, "get provider user: %s", err)
 		return
-	}
-
-	if u.id == "" {
+	} else if u.id == "" {
 		h.handleError(w, "provider user id is empty")
 		return
 	}
 
-	var authToken string
 
 	user, err := h.UserStore.GetByAuth(providerName, u.id)
 	switch err {
-	case nil:
-		if user.Blocked {
-			h.renderOAuthResult(w, "error:UserBlocked")
-			return
-		}
+		case nil:
+			if user.Blocked {
+				h.renderOAuthResult(w, "error:UserBlocked")
+				return
+			}
 
-		authToken, err = h.JWTService.Create(user.ID)
-		if err != nil {
-			h.handleError(w, "failed to create auth token: %s", err)
+			authToken, err := h.JWTService.Create(user.ID)
+			if err != nil {
+				h.handleError(w, "failed to create auth token: %s", err)
+				return
+			}
+			h.renderOAuthResult(w, "success:"+authToken)
 			return
-		}
 
-	case store.ErrNotFound:
-		userID, err := h.UserStore.New(providerName, u.id, "")
-		if err != nil {
-			h.handleError(w, "failed to create user: %s", err)
+		case store.ErrNotFound:
+			userID, err := h.UserStore.New(providerName, u.id, "")
+			if err != nil {
+				h.handleError(w, "failed to create user: %s", err)
+				return
+			}
+
+			authToken, err = h.JWTService.Create(userID)
+			if err != nil {
+				h.handleError(w, "failed to create auth token: %s", err)
+				return
+			}
+			h.renderOAuthResult(w, "success:"+authToken)
 			return
-		}
 
-		authToken, err = h.JWTService.Create(userID)
-		if err != nil {
-			h.handleError(w, "failed to create auth token: %s", err)
+		default:
+			h.handleError(w, "failed to get user by auth: %s", err)
 			return
-		}
-
-	default:
-		h.handleError(w, "failed to get user by auth: %s", err)
-		return
 	}
-
-	h.renderOAuthResult(w, "success:"+authToken)
 }
 
 func (h *Handler) renderOAuthResult(w http.ResponseWriter, message string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:   resultCookie,
-		Value:  message,
-		Path:   h.CookiePath,
-		HttpOnly: true,
-		Secure:   strings.HasPrefix(h.MountURL, "https"),
-		MaxAge:   600,
-	})
+	SetResultCookie(&h, w, message, 600)
 	h.Logger.Printf("redir url: %s", w)
-
 	fmt.Fprint(w, `<!doctype html><title>OAuth</title><script>try {opener.bebopOAuthEnd()} finally {window.close()}</script>`)
 }
 
-func (h *Handler) handleError(w http.ResponseWriter, format string, a ...interface{}) {
+func (h *Handler) renderError(w http.ResponseWriter, status int, code, message string) {
+	response := struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}{}
+	response.Error.Code = code
+	response.Error.Message = message
+	h.render(w, status, response)
+}
+
+func (h *Handler) render(w http.ResponseWriter, status int, data interface{}) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		h.logError("marshal json: %s", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(jsonData)
+}
+
+func (h *Handler) logError(format string, a ...interface{}) {
 	pc, _, _, _ := runtime.Caller(1)
 	callerNameSplit := strings.Split(runtime.FuncForPC(pc).Name(), ".")
 	funcName := callerNameSplit[len(callerNameSplit)-1]
 	h.Logger.Printf("ERROR: %s: %s", funcName, fmt.Sprintf(format, a...))
-	h.renderOAuthResult(w, "error:Other")
 }
 
-func (h *Handler) genState() string {
-	return uuid.NewV4().String()
+func (h *Handler) handleError(w http.ResponseWriter, format string, a ...interface{}) {
+	logError(format, a)
+	h.renderOAuthResult(w, "error:Other")
 }
