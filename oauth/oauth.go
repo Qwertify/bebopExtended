@@ -54,7 +54,7 @@ func New(config *Config) *Handler {
 	h.router.Get("/end/{provider}", h.handleEnd)
 	h.router.Post("/emailSignUp", h.handleEmailSignUp)
 	h.router.Post("/emailSignIn", h.handleEmailSignIn)
-	
+
 
 
 	return h
@@ -131,13 +131,6 @@ func (h *Handler) render(w http.ResponseWriter, status int, data interface{}) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "asd",
-		Value:    "456",
-		// Path:     h.CookiePath,
-		// HttpOnly: true,
-		// MaxAge:   -1,
-	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -174,9 +167,9 @@ func (h *Handler) handleEmailSignIn(w http.ResponseWriter, r *http.Request) {
 		Name:     stateCookie,
 		Value:    state,
 		Path:     h.CookiePath,
-		// HttpOnly: true,
-		// Secure:   strings.HasPrefix(h.MountURL, "http"),
-		// MaxAge:   1 * 60 * 60,
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(h.MountURL, "https"),
+		MaxAge:   3600,
 	})
 
 	var authToken string
@@ -225,22 +218,10 @@ func (h *Handler) handleEmailSignIn(w http.ResponseWriter, r *http.Request) {
 		// Secure: strings.HasPrefix(h.MountURL, "http"),
 		// MaxAge: 10 * 60,
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "asd",
-		Value:    "456",
-		// Path:     h.CookiePath,
-		// HttpOnly: true,
-		// MaxAge:   -1,
-	})
+
 	h.Logger.Printf("redir url: %s", w)
 
-
 	fmt.Fprint(w, `success`)
-
-
-
-
-
 }
 
 func (h *Handler) handleEmailSignUp(w http.ResponseWriter, r *http.Request) {
@@ -322,21 +303,10 @@ func (h *Handler) handleEmailSignUp(w http.ResponseWriter, r *http.Request) {
 		// Secure: strings.HasPrefix(h.MountURL, "http"),
 		// MaxAge: 10 * 60,
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "asd",
-		Value:    "456",
-		// Path:     h.CookiePath,
-		// HttpOnly: true,
-		// MaxAge:   -1,
-	})
+
 	h.Logger.Printf("redir url: %s", w)
 
 	fmt.Fprint(w, `success`)
-
-
-
-
-
 }
 
 func (h *Handler) handleBegin(w http.ResponseWriter, r *http.Request) {
@@ -354,15 +324,13 @@ func (h *Handler) handleBegin(w http.ResponseWriter, r *http.Request) {
 		redirectURL = provider.config.AuthCodeURL(state)
 	}
 
-	
-
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookie,
 		Value:    state,
 		Path:     h.CookiePath,
-		// HttpOnly: true,
-		// Secure:   strings.HasPrefix(h.MountURL, "http"),
-		// MaxAge:   1 * 60 * 60,
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(h.MountURL, "https"),
+		MaxAge:   3600,
 	})
 
 
@@ -378,7 +346,7 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 
 	// if providerName != "email" {
 
-	
+
 	provider, ok := h.providers[providerName]
 	if !ok {
 		h.Logger.Printf("in not found")
@@ -396,16 +364,9 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 		Name:     stateCookie,
 		Value:    "",
 		Path:     h.CookiePath,
-		// HttpOnly: true,
-		// MaxAge:   -1,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "qwe",
-		Value:    "123",
-		// Path:     h.CookiePath,
-		// HttpOnly: true,
-		// MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(h.MountURL, "https"),
+		MaxAge:   3600,
 	})
 
 	state := cookie.Value
@@ -418,7 +379,7 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	h.Logger.Printf("queryState: %s", queryState)
 	h.Logger.Printf("state: %s", state)
 	if queryState != state {
-		
+
 		h.handleError(w, "bad state value")
 		return
 	}
@@ -495,15 +456,9 @@ func (h *Handler) renderOAuthResult(w http.ResponseWriter, message string) {
 		Name:   resultCookie,
 		Value:  message,
 		Path:   h.CookiePath,
-		// Secure: strings.HasPrefix(h.MountURL, "http"),
-		// MaxAge: 10 * 60,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "asd",
-		Value:    "456",
-		// Path:     h.CookiePath,
-		// HttpOnly: true,
-		// MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(h.MountURL, "https"),
+		MaxAge:   600,
 	})
 	h.Logger.Printf("redir url: %s", w)
 
