@@ -13,7 +13,7 @@ type User struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	AuthService string    `json:"-"`
 	AuthID      string    `json:"-"`
-	Email 		string    `json:"email"`
+	Email 		  string    `json:"email"`
 	Password    string    `json:"password"`
 	Blocked     bool      `json:"-"`
 	Admin       bool      `json:"-"`

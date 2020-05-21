@@ -14,9 +14,6 @@ type userStore struct {
 // New creates a new user.
 func (s *userStore) New(authService string, authID string, password string) (int64, error) {
 	var id int64
-	
-
-	
 	if authService == "email" {
 		err := s.db.QueryRow(
 			`insert into users(created_at, auth_service, auth_id, email, password) values($1, $2, $3, $4, $5) returning id`,
@@ -24,7 +21,6 @@ func (s *userStore) New(authService string, authID string, password string) (int
 		).Scan(&id)
 
 		return id, err
-		
 	}
 
 	err := s.db.QueryRow(
@@ -36,17 +32,17 @@ func (s *userStore) New(authService string, authID string, password string) (int
 }
 
 const selectFromUsers = `
-	select 
-		id, 
-		coalesce(name, '') as name, 
+	select
+		id,
+		coalesce(name, '') as name,
 		created_at,
 		auth_service,
 		email,
 		password,
 		auth_id,
 		blocked,
-		admin, 
-		avatar 
+		admin,
+		avatar
 	from users
 `
 
